@@ -9,6 +9,7 @@ from .auth import Auth
 from .events import Events
 from ..core import base64encode
 import warnings
+import httpx
 
 ACCOUNT_ID = '~'
 ACCOUNT_PREFIX = '/account/'
@@ -63,6 +64,7 @@ class Platform(Observable):
 
     def create_url(self, url, add_server=False, add_method=None, add_token=False):
         built_url = ''
+        print(f"XXX TYPE {type(url)}")
         has_http = url.startswith('http://') or url.startswith('https://')
 
         if add_server and not has_http:
@@ -99,7 +101,7 @@ class Platform(Observable):
             built_url += '&code_challenge=' + urllib.parse.quote(challenge) + '&code_challenge_method=' + challenge_method
         return built_url
         
-    def login(self, username='', extension='', password='', code='', redirect_uri='', jwt='', verifier=''):
+    async def login(self, username='', extension='', password='', code='', redirect_uri='', jwt='', verifier=''):
         try:
             if not code and not username and not password and not jwt:
                 raise Exception('Either code, or username with password, or jwt has to be provided')
@@ -121,6 +123,7 @@ class Platform(Observable):
                     'assertion': jwt
                 }
             else:
+                print("Warning: Redirect URI handling is likely broken w. async code.")
                 body = {
                     'grant_type': 'authorization_code',
                     'redirect_uri': redirect_uri if redirect_uri else self._redirect_uri,
@@ -130,7 +133,7 @@ class Platform(Observable):
                     body['code_verifier'] = verifier
 
             built_url = self.create_url( TOKEN_ENDPOINT, add_server=True )
-            response = self._request_token( built_url, body=body)
+            response = await self._request_token( built_url, body=body)
             self._auth.set_data(response.json_dict())
             self.trigger(Events.loginSuccess, response)
             return response
@@ -138,11 +141,11 @@ class Platform(Observable):
             self.trigger(Events.loginError, e)
             raise e
 
-    def refresh(self):
+    async def refresh(self):
         try:
             if not self._auth.refresh_token_valid():
                 raise Exception('Refresh token has expired')
-            response = self._request_token(TOKEN_ENDPOINT, body={
+            response = await self._request_token(TOKEN_ENDPOINT, body={
                 'grant_type': 'refresh_token',
                 'refresh_token': self._auth.refresh_token(),
                 'access_token_ttl': ACCESS_TOKEN_TTL,
@@ -155,9 +158,9 @@ class Platform(Observable):
             self.trigger(Events.refreshError, e)
             raise e
 
-    def logout(self):
+    async def logout(self):
         try:
-            response = self._request_token(REVOKE_ENDPOINT, body={
+            response = await self._request_token(REVOKE_ENDPOINT, body={
                 'token': self._auth.access_token()
             })
             self._auth.reset()
@@ -167,47 +170,51 @@ class Platform(Observable):
             self.trigger(Events.logoutError, e)
             raise e
 
-    def inflate_request(self, request, skip_auth_check=False):
+    async def inflate_request(self, request, skip_auth_check=False):
+        print(f"\n\n---> VANILLA REQUEST\n{request}\n{request.headers}---\n")
+        #assert "host" in request.headers
+        
         if not skip_auth_check:
-            self._ensure_authentication()
+            await self._ensure_authentication()
             request.headers['Authorization'] = self._auth_header()
 
         request.headers['User-Agent'] = self._userAgent
         request.headers['X-User-Agent'] = self._userAgent
-        request.url = self.create_url(request.url, add_server=True)
-
+        request.url = httpx.URL(self.create_url(str(request.url), add_server=True))
+        request.headers["host" ] = request.url.host
+        print(f"\n\n---> INFLATED REQUEST\n{request}\n{request.headers}---\n")
         return request
 
-    def send_request(self, request, skip_auth_check=False):
-        return self._client.send(self.inflate_request(request, skip_auth_check=skip_auth_check))
+    async def send_request(self, request, skip_auth_check=False):
+        return await self._client.send(await self.inflate_request(request, skip_auth_check=skip_auth_check))
 
-    def get(self, url, query_params=None, headers=None, skip_auth_check=False):
+    async def get(self, url, query_params=None, headers=None, skip_auth_check=False):
         request = self._client.create_request('GET', url, query_params=query_params, headers=headers)
-        return self.send_request(request, skip_auth_check=skip_auth_check)
+        return await self.send_request(request, skip_auth_check=skip_auth_check)
 
-    def post(self, url, body=None, query_params=None, headers=None, skip_auth_check=False):
+    async def post(self, url, body=None, query_params=None, headers=None, skip_auth_check=False):
         request = self._client.create_request('POST', url, query_params=query_params, headers=headers, body=body)
-        return self.send_request(request, skip_auth_check=skip_auth_check)
+        return await self.send_request(request, skip_auth_check=skip_auth_check)
 
-    def put(self, url, body=None, query_params=None, headers=None, skip_auth_check=False):
+    async def put(self, url, body=None, query_params=None, headers=None, skip_auth_check=False):
         request = self._client.create_request('PUT', url, query_params=query_params, headers=headers, body=body)
-        return self.send_request(request, skip_auth_check=skip_auth_check)
+        return await self.send_request(request, skip_auth_check=skip_auth_check)
 
-    def patch(self, url, body=None, query_params=None, headers=None, skip_auth_check=False):
+    async def patch(self, url, body=None, query_params=None, headers=None, skip_auth_check=False):
         request = self._client.create_request('PATCH', url, query_params=query_params, headers=headers, body=body)
-        return self.send_request(request, skip_auth_check=skip_auth_check)
+        return await self.send_request(request, skip_auth_check=skip_auth_check)
 
-    def delete(self, url, query_params=None, headers=None, skip_auth_check=False):
+    async def delete(self, url, query_params=None, headers=None, skip_auth_check=False):
         request = self._client.create_request('DELETE', url, query_params=query_params, headers=headers)
-        return self.send_request(request, skip_auth_check=skip_auth_check)
+        return await self.send_request(request, skip_auth_check=skip_auth_check)
 
-    def _request_token(self, path='', body=None):
+    async def _request_token(self, path='', body=None):
         headers = {
             'Authorization': 'Basic ' + self._api_key(),
             'Content-Type': 'application/x-www-form-urlencoded'
         }
         request = self._client.create_request('POST', path, body=body, headers=headers)
-        return self.send_request(request, skip_auth_check=True)
+        return await self.send_request(request, skip_auth_check=True)
 
     def _api_key(self):
         return base64encode(self._key + ':' + self._secret)
@@ -215,6 +222,6 @@ class Platform(Observable):
     def _auth_header(self):
         return self._auth.token_type() + ' ' + self._auth.access_token()
 
-    def _ensure_authentication(self):
+    async def _ensure_authentication(self):
         if not self._auth.access_token_valid():
-            self.refresh()
+            await self.refresh()

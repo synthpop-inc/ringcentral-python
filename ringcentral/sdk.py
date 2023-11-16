@@ -1,7 +1,8 @@
 from .platform import Platform
 from .websocket import WebSocketClient
 from .deprecated_pubnub_subscription import Subscription
-from .http import Client, MultipartBuilder
+from .http import MultipartBuilder
+from .http.async_client import Client
 import warnings
 
 

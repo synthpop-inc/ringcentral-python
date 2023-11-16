@@ -11,12 +11,22 @@ class ApiResponse:
     def __init__(self, request=None, response=None):
         self._request = request
         self._response = response
+        self._raw = None
 
     def ok(self):
-        return self._response.ok
+        return self._response.is_success
 
     def raw(self):
-        return self._response.raw
+        # TODO: This is likely broken.
+        print("RAW is called")
+        if self._raw is not None:
+            return self._raw
+    
+        raw = bytearray()
+        for data in self._response.iter_raw:
+            raw.append(data)
+        self._raw = raw
+        return self._raw
 
     def body(self):
         return self._response.content
