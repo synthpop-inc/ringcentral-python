@@ -1,8 +1,9 @@
 import json
 import httpx
+import requests
 
 
-class MultipartBuilder:
+class MultipartBuilderBase:
     def __init__(self, platform):
         self._body = None
         self._contents = []
@@ -41,6 +42,19 @@ class MultipartBuilder:
         self._contents.append((name, attachment))
         return self
 
+
+class MultipartBuilder(MultipartBuilderBase):
+    def request(self, url, method='POST'):
+        files = [('json', ('request.json', json.dumps(self._body), 'application/json'))] + self._contents
+        request = requests.Request(method, url, files=files)
+        if self._multipart_mixed: # Ref: https://github.com/requests/requests/issues/1736#issuecomment-28470217
+            request.url = self._platform.create_url(request.url, add_server=True) # prepare requires full url
+            request = request.prepare()
+            request.headers['Content-Type'] = request.headers['Content-Type'].replace('multipart/form-data;', 'multipart/mixed;')
+        return request
+
+
+class MultipartBuilderAsync(MultipartBuilderBase):
     def request(self, url, method='POST'):
         files = [('json', ('request.json', json.dumps(self._body), 'application/json'))] + self._contents
 

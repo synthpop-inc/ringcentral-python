@@ -1,12 +1,9 @@
 #!/usr/bin/env python
 # encoding: utf-8
 import json
-import urllib
-import requests
-
 import httpx
 
-from .api_response import ApiResponse
+from .api_response import ApiResponseAsync as ApiResponse
 from .api_exception import ApiException
 from ..core import urlencode, iterator
 
@@ -79,8 +76,6 @@ class AsyncClient:
         elif content_type.lower().find('application/x-www-form-urlencoded') >= 0:
             body = urlencode(body) if body else None
 
-        print(f"HEADERS: {headers}")
-            
         return self._async_client.build_request(
             method,
             url,

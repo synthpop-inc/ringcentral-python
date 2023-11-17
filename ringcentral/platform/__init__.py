@@ -1,2 +1,2 @@
 from .auth import Auth
-from .platform import Platform
+from .platform import Platform, PlatformAsync

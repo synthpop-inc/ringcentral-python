@@ -32,7 +32,7 @@ KNOWN_PREFIXES = [
 ]
 
 
-class Platform(Observable):
+class PlatformBase(Observable):
     def __init__(self, client, key='', secret='', server='', name='', version='', redirect_uri='',
                  known_prefixes=None):
 
@@ -99,7 +99,131 @@ class Platform(Observable):
         if challenge:
             built_url += '&code_challenge=' + urllib.parse.quote(challenge) + '&code_challenge_method=' + challenge_method
         return built_url
-        
+
+    def _api_key(self):
+        return base64encode(self._key + ':' + self._secret)
+
+    def _auth_header(self):
+        return self._auth.token_type() + ' ' + self._auth.access_token()
+
+
+class Platform(PlatformBase):
+    def login(self, username='', extension='', password='', code='', redirect_uri='', jwt='', verifier=''):
+        try:
+            if not code and not username and not password and not jwt:
+                raise Exception('Either code, or username with password, or jwt has to be provided')
+            if username and password:
+                warnings.warn("username-password login will soon be deprecated. Please use jwt or OAuth instead.")
+            if not code and not jwt:
+                body = {
+                    'grant_type': 'password',
+                    'username': username,
+                    'password': password,
+                    'access_token_ttl': ACCESS_TOKEN_TTL,
+                    'refresh_token_ttl': REFRESH_TOKEN_TTL
+                }
+                if extension:
+                    body['extension'] = extension
+            elif jwt:
+                body = {
+                    'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+                    'assertion': jwt
+                }
+            else:
+                body = {
+                    'grant_type': 'authorization_code',
+                    'redirect_uri': redirect_uri if redirect_uri else self._redirect_uri,
+                    'code': code
+                }
+                if verifier:
+                    body['code_verifier'] = verifier
+
+            built_url = self.create_url( TOKEN_ENDPOINT, add_server=True )
+            response = self._request_token( built_url, body=body)
+            self._auth.set_data(response.json_dict())
+            self.trigger(Events.loginSuccess, response)
+            return response
+        except Exception as e:
+            self.trigger(Events.loginError, e)
+            raise e
+
+    def refresh(self):
+        try:
+            if not self._auth.refresh_token_valid():
+                raise Exception('Refresh token has expired')
+            response = self._request_token(TOKEN_ENDPOINT, body={
+                'grant_type': 'refresh_token',
+                'refresh_token': self._auth.refresh_token(),
+                'access_token_ttl': ACCESS_TOKEN_TTL,
+                'refresh_token_ttl': REFRESH_TOKEN_TTL
+            })
+            self._auth.set_data(response.json_dict())
+            self.trigger(Events.refreshSuccess, response)
+            return response
+        except Exception as e:
+            self.trigger(Events.refreshError, e)
+            raise e
+
+    def logout(self):
+        try:
+            response = self._request_token(REVOKE_ENDPOINT, body={
+                'token': self._auth.access_token()
+            })
+            self._auth.reset()
+            self.trigger(Events.logoutSuccess, response)
+            return response
+        except Exception as e:
+            self.trigger(Events.logoutError, e)
+            raise e
+
+    def inflate_request(self, request, skip_auth_check=False):
+        if not skip_auth_check:
+            self._ensure_authentication()
+            request.headers['Authorization'] = self._auth_header()
+
+        request.headers['User-Agent'] = self._userAgent
+        request.headers['X-User-Agent'] = self._userAgent
+        request.url = self.create_url(request.url, add_server=True)
+
+        return request
+
+    def send_request(self, request, skip_auth_check=False):
+        return self._client.send(self.inflate_request(request, skip_auth_check=skip_auth_check))
+
+    def get(self, url, query_params=None, headers=None, skip_auth_check=False):
+        request = self._client.create_request('GET', url, query_params=query_params, headers=headers)
+        return self.send_request(request, skip_auth_check=skip_auth_check)
+
+    def post(self, url, body=None, query_params=None, headers=None, skip_auth_check=False):
+        request = self._client.create_request('POST', url, query_params=query_params, headers=headers, body=body)
+        return self.send_request(request, skip_auth_check=skip_auth_check)
+
+    def put(self, url, body=None, query_params=None, headers=None, skip_auth_check=False):
+        request = self._client.create_request('PUT', url, query_params=query_params, headers=headers, body=body)
+        return self.send_request(request, skip_auth_check=skip_auth_check)
+
+    def patch(self, url, body=None, query_params=None, headers=None, skip_auth_check=False):
+        request = self._client.create_request('PATCH', url, query_params=query_params, headers=headers, body=body)
+        return self.send_request(request, skip_auth_check=skip_auth_check)
+
+    def delete(self, url, query_params=None, headers=None, skip_auth_check=False):
+        request = self._client.create_request('DELETE', url, query_params=query_params, headers=headers)
+        return self.send_request(request, skip_auth_check=skip_auth_check)
+
+    def _request_token(self, path='', body=None):
+        headers = {
+            'Authorization': 'Basic ' + self._api_key(),
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }
+        request = self._client.create_request('POST', path, body=body, headers=headers)
+        return self.send_request(request, skip_auth_check=True)
+
+    def _ensure_authentication(self):
+        if not self._auth.access_token_valid():
+            self.refresh()
+
+
+class PlatformAsync(PlatformBase):
     async def login(self, username='', extension='', password='', code='', redirect_uri='', jwt='', verifier=''):
         try:
             if not code and not username and not password and not jwt:
@@ -210,12 +334,6 @@ class Platform(Observable):
         }
         request = self._client.create_request('POST', path, body=body, headers=headers)
         return await self.send_request(request, skip_auth_check=True)
-
-    def _api_key(self):
-        return base64encode(self._key + ':' + self._secret)
-
-    def _auth_header(self):
-        return self._auth.token_type() + ' ' + self._auth.access_token()
 
     async def _ensure_authentication(self):
         if not self._auth.access_token_valid():

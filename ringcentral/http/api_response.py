@@ -7,26 +7,11 @@ from .json_object import *
 from ..core import is_third
 
 
-class ApiResponse:
-    def __init__(self, request=None, response=None):
+class ApiResponseBase:
+    def __init__(self, request, response, response_factory):
         self._request = request
         self._response = response
-        self._raw = None
-
-    def ok(self):
-        return self._response.is_success
-
-    def raw(self):
-        # TODO: This is likely broken.
-        print("RAW is called")
-        if self._raw is not None:
-            return self._raw
-    
-        raw = bytearray()
-        for data in self._response.iter_raw:
-            raw.append(data)
-        self._raw = raw
-        return self._raw
+        self._response_factory = response_factory
 
     def body(self):
         return self._response.content
@@ -60,7 +45,7 @@ class ApiResponse:
         responses = []
 
         for response, payload in zip(statuses["response"], parts[1:]):
-            res = create_response(payload, response['status'])
+            res = self._response_factory(payload, response['status'])
 
             responses.append(ApiResponse(response=res))
 
@@ -116,6 +101,38 @@ class ApiResponse:
         return parts
 
 
+class ApiResponse(ApiResponseBase):
+    def __init__(self, request=None, response=None):
+        super().__init__(request=request, response=response, response_factory=create_response)
+
+    def ok(self):
+        return self._response.ok
+
+    def raw(self):
+        return self._response.raw
+
+
+class ApiResponseAsync(ApiResponseBase):
+    def __init__(self, request=None, response=None):
+        super().__init__(request=request, response=response, response_factory=create_response_httpx)
+        self._raw = None
+
+    def ok(self):
+        return self._response.is_success
+
+    def raw(self):
+        # TODO: This is likely broken.
+        print("RAW is called")
+        if self._raw is not None:
+            return self._raw
+    
+        raw = bytearray()
+        for data in self._response.iter_raw:
+            raw.append(data)
+        self._raw = raw
+        return self._raw
+
+
 def create_response(payload, status):
     res = requests.Response()
     res.headers = dict(payload)
@@ -126,3 +143,16 @@ def create_response(payload, status):
         res._content = str(payload.get_payload())
     res.status_code = status
     return res
+
+
+def create_response_httpx(payload, status):
+    headers = dict(payload)
+    if is_third():
+        content = bytes(payload.get_payload(), 'utf8')
+    else:
+        content = str(payload.get_payload())
+    return httpx.Response(
+        status_code=status,
+        headers=headers,
+        content=content,
+    )
