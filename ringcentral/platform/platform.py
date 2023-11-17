@@ -64,7 +64,6 @@ class Platform(Observable):
 
     def create_url(self, url, add_server=False, add_method=None, add_token=False):
         built_url = ''
-        print(f"XXX TYPE {type(url)}")
         has_http = url.startswith('http://') or url.startswith('https://')
 
         if add_server and not has_http:

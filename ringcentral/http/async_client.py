@@ -11,7 +11,7 @@ from .api_exception import ApiException
 from ..core import urlencode, iterator
 
 
-class Client:
+class AsyncClient:
     def __init__(self):
         self._async_client = httpx.AsyncClient()
 
