@@ -171,9 +171,6 @@ class Platform(Observable):
             raise e
 
     async def inflate_request(self, request, skip_auth_check=False):
-        print(f"\n\n---> VANILLA REQUEST\n{request}\n{request.headers}---\n")
-        #assert "host" in request.headers
-        
         if not skip_auth_check:
             await self._ensure_authentication()
             request.headers['Authorization'] = self._auth_header()
@@ -182,7 +179,6 @@ class Platform(Observable):
         request.headers['X-User-Agent'] = self._userAgent
         request.url = httpx.URL(self.create_url(str(request.url), add_server=True))
         request.headers["host" ] = request.url.host
-        print(f"\n\n---> INFLATED REQUEST\n{request}\n{request.headers}---\n")
         return request
 
     async def send_request(self, request, skip_auth_check=False):

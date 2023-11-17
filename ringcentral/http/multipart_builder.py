@@ -1,5 +1,5 @@
 import json
-import requests
+import httpx
 
 
 class MultipartBuilder:
@@ -11,6 +11,7 @@ class MultipartBuilder:
         self._platform = platform
 
     def set_multipart_mixed(self, multipart_mixed):
+        print("This is likely broken with async support")
         self._multipart_mixed = multipart_mixed
         return self
 
@@ -42,9 +43,10 @@ class MultipartBuilder:
 
     def request(self, url, method='POST'):
         files = [('json', ('request.json', json.dumps(self._body), 'application/json'))] + self._contents
-        request = requests.Request(method, url, files=files)
+
+        client = httpx.AsyncClient()
+        request = client.build_request(method, url, files=files)
+        
         if self._multipart_mixed: # Ref: https://github.com/requests/requests/issues/1736#issuecomment-28470217
-            request.url = self._platform.create_url(request.url, add_server=True) # prepare requires full url
-            request = request.prepare()
             request.headers['Content-Type'] = request.headers['Content-Type'].replace('multipart/form-data;', 'multipart/mixed;')
         return request
